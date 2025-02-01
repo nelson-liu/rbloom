@@ -1,4 +1,6 @@
 /target
+tests/gcs_test.py
+tests/make_gcs_test.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

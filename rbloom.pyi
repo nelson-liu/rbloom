@@ -21,6 +21,10 @@ class Bloom:
     @classmethod
     def load(cls, filepath: Union[str, bytes, os.PathLike]) -> Bloom: ...
 
+    # load from GCS
+    @classmethod
+    def load_from_gcs(cls, bucket: str, object_path: str) -> Bloom: ...
+
     # load from bytes(), see section "Persistence"
     @classmethod
     def load_bytes(cls, data: bytes) -> Bloom: ...

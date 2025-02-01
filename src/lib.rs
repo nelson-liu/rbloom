@@ -1,5 +1,6 @@
 use bitline::BitLine;
-use pyo3::exceptions::{PyValueError};
+use cloud_storage::Object;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyType;
 use pyo3::{basic::CompareOp, types::PyBytes, types::PyTuple};
@@ -265,6 +266,35 @@ impl Bloom {
         })
     }
 
+    /// Load a Bloom filter from Google Cloud Storage
+    /// without holding two copies of the bit array in memory.
+    #[classmethod]
+    pub fn load_from_gcs(_cls: &Bound<'_, PyType>, bucket: String, object_path: String) -> PyResult<Bloom> {
+        // 1) Download the entire object (synchronous) into *one* Vec<u8>.
+        let mut data = Object::download_sync(&bucket, &object_path)
+            .map_err(|e| PyValueError::new_err(format!("GCS download failed: {e}")))?;
+
+        // 2) Parse the first 8 bytes to get `k`.
+        if data.len() < mem::size_of::<u64>() {
+            return Err(PyValueError::new_err(
+                "Object is too small to contain a valid Bloom filter",
+            ));
+        }
+        let (k_bytes, _) = data.split_at(mem::size_of::<u64>());
+        let k = u64::from_le_bytes(k_bytes.try_into().unwrap());
+
+        // 3) Remove those 8 bytes from the front of `data`.
+        // Now `data` is exactly the raw bits used by BitLine.
+        // Draining 0..8 does *not* copy the remainder.
+        data.drain(0..mem::size_of::<u64>());
+
+        // 4) Build the BitLine directly from this vector.
+        //    `Vec::into_boxed_slice()` does not copy on stable Rust >= 1.48.
+        let filter = BitLine::from_boxed_slice(data.into_boxed_slice());
+
+        Ok(Bloom { filter, k })
+    }
+
     /// Save to a file, see "Persistence" section in the README
     fn save(&self, filepath: PathBuf) -> PyResult<()> {
         let mut file = File::create(filepath)?;
@@ -355,6 +385,11 @@ mod bitline {
                 }
                 None => Err(PyValueError::new_err("too many bits")),
             }
+        }
+
+        /// Create a BitLine directly from a boxed slice
+        pub fn from_boxed_slice(bits: Box<[u8]>) -> Self {
+            BitLine { bits }
         }
 
         /// Make sure that index is less than len when calling this!

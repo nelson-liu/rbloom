@@ -14,3 +14,4 @@ pyo3 = { version = "0.23", features = [
     "abi3-py37",
 ] } # stable ABI with minimum Python version 3.7
 sha2 = "0.10"
+cloud-storage = { version = "0.11", features = ["sync", "global-client"] }
