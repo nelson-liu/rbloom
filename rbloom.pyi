@@ -1,5 +1,5 @@
 import os
-from typing import Any, Callable, Iterable, Union, final
+from typing import Iterable, Union, final
 
 
 @final
@@ -7,17 +7,11 @@ class Bloom:
 
     # expected_items:  max number of items to be added to the filter
     # false_positive_rate:  max false positive rate of the filter
-    # hash_func:  optional argument, see section "Cryptographic security"
-    def __init__(self, expected_items: int, false_positive_rate: float,
-                 hash_func=__builtins__.hash) -> None: ...
+    def __init__(self, expected_items: int, false_positive_rate: float) -> None: ...
 
     # number of buckets in the filter
     @property
     def size_in_bits(self) -> int: ...
-
-    # retrieve the hash_func given to __init__
-    @property
-    def hash_func(self) -> Callable[[Any], int]: ...
 
     # estimated number of items in the filter
     @property
@@ -25,11 +19,11 @@ class Bloom:
 
     # load from file, see section "Persistence"
     @classmethod
-    def load(cls, filepath: Union[str, bytes, os.PathLike], hash_func: Callable[[Any], int]) -> Bloom: ...
+    def load(cls, filepath: Union[str, bytes, os.PathLike]) -> Bloom: ...
 
     # load from bytes(), see section "Persistence"
     @classmethod
-    def load_bytes(cls, data: bytes, hash_func: Callable[[Any], int]) -> Bloom: ...
+    def load_bytes(cls, data: bytes) -> Bloom: ...
 
     # save to file, see section "Persistence"
     def save(self, filepath: Union[str, bytes, os.PathLike]) -> None: ...
@@ -43,9 +37,9 @@ class Bloom:
     #                     OF THE BUILT-IN SET TYPE                      #
     #####################################################################
 
-    def add(self, obj: Any, /) -> None: ...
+    def add(self, hashed: int, /) -> None: ...
 
-    def __contains__(self, obj: Any) -> bool: ...
+    def __contains__(self, hashed: int) -> bool: ...
 
     def __bool__(self) -> bool: ...                   # False if empty
 

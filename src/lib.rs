@@ -1,9 +1,8 @@
 use bitline::BitLine;
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyValueError};
 use pyo3::prelude::*;
-use pyo3::sync::GILOnceCell;
 use pyo3::types::PyType;
-use pyo3::{basic::CompareOp, types::PyBytes, types::PyTuple, PyTraverseError, PyVisit};
+use pyo3::{basic::CompareOp, types::PyBytes, types::PyTuple};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::mem;
@@ -13,9 +12,7 @@ use std::path::PathBuf;
 #[derive(Clone)]
 struct Bloom {
     filter: BitLine,
-    k: u64, // Number of hash functions (implemented via a LCG that uses
-    // the original hash as a seed)
-    hash_func: Option<Py<PyAny>>,
+    k: u64, // Number of hash functions
 }
 
 #[pymethods]
@@ -24,7 +21,6 @@ impl Bloom {
     fn new(
         expected_items: u64,
         false_positive_rate: f64,
-        hash_func: Option<Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         // Check the inputs
         if false_positive_rate <= 0.0 || false_positive_rate >= 1.0 {
@@ -37,15 +33,6 @@ impl Bloom {
                 "expected_items must be greater than 0",
             ));
         }
-        let hash_func = match hash_func {
-            Some(hash_func) if !hash_func.is(builtin_hash_func(hash_func.py())?) => {
-                if !hash_func.is_callable() {
-                    return Err(PyTypeError::new_err("hash_func must be callable"));
-                }
-                Some(hash_func.unbind())
-            }
-            _ => None,
-        };
 
         // Calculate the parameters for the filter
         let size_in_bits =
@@ -56,7 +43,6 @@ impl Bloom {
         Ok(Bloom {
             filter: BitLine::new(size_in_bits as u64)?,
             k: k as u64,
-            hash_func,
         })
     }
 
@@ -64,15 +50,6 @@ impl Bloom {
     #[getter]
     fn size_in_bits(&self) -> u64 {
         self.filter.len()
-    }
-
-    /// Retrieve the hash_func given to __init__
-    #[getter]
-    fn hash_func<'py>(&self, py: Python<'py>) -> PyResult<&Bound<'py, PyAny>> {
-        match self.hash_func.as_ref() {
-            Some(hash_func) => Ok(hash_func.bind(py)),
-            None => builtin_hash_func(py),
-        }
     }
 
     /// Estimated number of items in the filter
@@ -83,10 +60,9 @@ impl Bloom {
         (len / (self.k as f64) * (1.0 - (bits_set) / len).ln()).abs()
     }
 
-    #[pyo3(signature = (o, /))]
-    fn add(&mut self, o: &Bound<'_, PyAny>) -> PyResult<()> {
-        let hash = hash(o, &self.hash_func)?;
-        for index in lcg::generate_indexes(hash, self.k, self.filter.len()) {
+    #[pyo3(signature = (hashed, /))]
+    fn add(&mut self, hashed: i128) -> PyResult<()> {
+        for index in lcg::generate_indexes(hashed, self.k, self.filter.len()) {
             self.filter.set(index);
         }
         Ok(())
@@ -116,9 +92,9 @@ impl Bloom {
         })
     }
 
-    fn __contains__(&self, o: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let hash = hash(o, &self.hash_func)?;
-        for index in lcg::generate_indexes(hash, self.k, self.filter.len()) {
+
+    fn __contains__(&self, hashed: i128) -> PyResult<bool> {
+        for index in lcg::generate_indexes(hashed, self.k, self.filter.len()) {
             if !self.filter.get(index) {
                 return Ok(false);
             }
@@ -142,12 +118,11 @@ impl Bloom {
         Ok(result)
     }
 
-    fn __or__(&self, py: Python<'_>, other: &Bloom) -> PyResult<Bloom> {
+    fn __or__(&self, _py: Python<'_>, other: &Bloom) -> PyResult<Bloom> {
         check_compatible(self, other)?;
         Ok(Bloom {
             filter: &self.filter | &other.filter,
             k: self.k,
-            hash_func: self.hash_fn_clone(py),
         })
     }
 
@@ -157,12 +132,11 @@ impl Bloom {
         Ok(())
     }
 
-    fn __and__(&self, py: Python<'_>, other: &Bloom) -> PyResult<Bloom> {
+    fn __and__(&self, _py: Python<'_>, other: &Bloom) -> PyResult<Bloom> {
         check_compatible(self, other)?;
         Ok(Bloom {
             filter: &self.filter & &other.filter,
             k: self.k,
-            hash_func: self.hash_fn_clone(py),
         })
     }
 
@@ -182,8 +156,9 @@ impl Bloom {
             }
             // Otherwise, iterate over the other object and add each item
             else {
-                for obj in other.iter()? {
-                    self.add(&obj?)?;
+                for obj in other.try_iter()? {
+                    let h: i128 = obj?.extract()?;
+                    self.add(h)?;
                 }
             }
         }
@@ -204,8 +179,9 @@ impl Bloom {
             else {
                 let temp = temp.get_or_insert_with(|| self.clone());
                 temp.clear();
-                for obj in other.iter()? {
-                    temp.add(&obj?)?;
+                for obj in other.try_iter()? {
+                    let h: i128 = obj?.extract()?;
+                    temp.add(h)?;
                 }
                 self.__iand__(temp)?;
             }
@@ -255,20 +231,7 @@ impl Bloom {
     fn load(
         _cls: &Bound<'_, PyType>,
         filepath: PathBuf,
-        hash_func: &Bound<'_, PyAny>,
     ) -> PyResult<Bloom> {
-        // check that the hash_func is callable
-        if !hash_func.is_callable() {
-            return Err(PyTypeError::new_err("hash_func must be callable"));
-        }
-        // check that the hash_func isn't the built-in hash function
-        if hash_func.is(builtin_hash_func(hash_func.py())?) {
-            return Err(PyValueError::new_err(
-                "Cannot load a bloom filter that uses the built-in hash function",
-            ));
-        }
-        let hash_func = Some(hash_func.to_object(hash_func.py()));
-
         let mut file = File::open(filepath)?;
 
         let mut k_bytes = [0; mem::size_of::<u64>()];
@@ -280,7 +243,6 @@ impl Bloom {
         Ok(Bloom {
             filter,
             k,
-            hash_func,
         })
     }
 
@@ -289,20 +251,7 @@ impl Bloom {
     fn load_bytes(
         _cls: &Bound<'_, PyType>,
         bytes: &[u8],
-        hash_func: &Bound<'_, PyAny>,
     ) -> PyResult<Bloom> {
-        // check that the hash_func is callable
-        if !hash_func.is_callable() {
-            return Err(PyTypeError::new_err("hash_func must be callable"));
-        }
-        // check that the hash_func isn't the built-in hash function
-        if hash_func.is(builtin_hash_func(hash_func.py())?) {
-            return Err(PyValueError::new_err(
-                "Cannot load a bloom filter that uses the built-in hash function",
-            ));
-        }
-        let hash_func = Some(hash_func.to_object(hash_func.py()));
-
         let k_bytes: [u8; mem::size_of::<u64>()] = bytes[0..mem::size_of::<u64>()]
             .try_into()
             .expect("slice with incorrect length");
@@ -313,17 +262,11 @@ impl Bloom {
         Ok(Bloom {
             filter,
             k,
-            hash_func,
         })
     }
 
     /// Save to a file, see "Persistence" section in the README
     fn save(&self, filepath: PathBuf) -> PyResult<()> {
-        if self.hash_func.is_none() {
-            return Err(PyValueError::new_err(
-                "Cannot save a bloom filter that uses the built-in hash function",
-            ));
-        }
         let mut file = File::create(filepath)?;
         file.write_all(&self.k.to_le_bytes())?;
         self.filter.save(&mut file)?;
@@ -333,38 +276,22 @@ impl Bloom {
     /// Save to a byte(), see "Persistence" section in the README
     fn save_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         const K_SIZE: usize = mem::size_of::<u64>();
-        if self.hash_func.is_none() {
-            return Err(PyValueError::new_err(
-                "Cannot save a bloom filter that uses the built-in hash function",
-            ));
-        }
-
         debug_assert_eq!(K_SIZE, self.k.to_le_bytes().len());
         let len = K_SIZE + self.filter.bits().len();
-        PyBytes::new_bound_with(py, len, |data| {
+        PyBytes::new_with(py, len, |data| {
             data[..K_SIZE].copy_from_slice(&self.k.to_le_bytes());
             data[K_SIZE..].copy_from_slice(self.filter.bits());
             Ok(())
         })
     }
-
-    fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
-        visit.call(&self.hash_func)?;
-        Ok(())
-    }
 }
 
 // Non-python methods
 impl Bloom {
-    fn hash_fn_clone(&self, py: Python<'_>) -> Option<Py<PyAny>> {
-        self.hash_func.as_ref().map(|f| f.clone_ref(py))
-    }
-
-    fn zeroed_clone(&self, py: Python<'_>) -> Bloom {
+    fn zeroed_clone(&self, _py: Python<'_>) -> Bloom {
         Bloom {
             filter: BitLine::new(self.filter.len()).unwrap(),
             k: self.k,
-            hash_func: self.hash_fn_clone(py),
         }
     }
 
@@ -382,8 +309,9 @@ impl Bloom {
             }
             Err(_) => {
                 let mut other_bloom = self.zeroed_clone(other.py());
-                for obj in other.iter()? {
-                    other_bloom.add(&obj?)?;
+                for obj in other.try_iter()? {
+                    let h: i128 = obj?.extract()?;
+                    other_bloom.add(h)?;
                 }
                 f(&other_bloom)
             }
@@ -606,16 +534,6 @@ mod lcg {
     }
 }
 
-fn hash(o: &Bound<'_, PyAny>, hash_func: &Option<Py<PyAny>>) -> PyResult<i128> {
-    match hash_func {
-        Some(hash_func) => {
-            let hash_func = hash_func.bind(o.py());
-            let hash = hash_func.call1((o,))?;
-            Ok(hash.extract()?)
-        }
-        None => Ok(o.hash()? as i128),
-    }
-}
 
 fn check_compatible(a: &Bloom, b: &Bloom) -> PyResult<()> {
     if a.k != b.k || a.filter.len() != b.filter.len() {
@@ -624,30 +542,9 @@ fn check_compatible(a: &Bloom, b: &Bloom) -> PyResult<()> {
         ));
     }
 
-    // now only the hash function can be different
-    match (&a.hash_func, &b.hash_func) {
-        (Some(lhs), Some(rhs)) if lhs.is(rhs) => {}
-        (&None, &None) => {}
-        _ => {
-            return Err(PyValueError::new_err(
-                "Bloom filters must have the same hash function",
-            ))
-        }
-    }
-
     Ok(())
 }
 
-fn builtin_hash_func(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
-    static HASH_FUNC: GILOnceCell<Py<PyAny>> = GILOnceCell::new();
-
-    let res = HASH_FUNC.get_or_try_init(py, || -> PyResult<_> {
-        let builtins = PyModule::import_bound(py, "builtins")?;
-        Ok(builtins.getattr("hash")?.unbind())
-    })?;
-
-    Ok(res.bind(py))
-}
 
 #[pymodule]
 fn rbloom(m: &Bound<'_, PyModule>) -> PyResult<()> {
