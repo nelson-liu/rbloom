@@ -3,7 +3,7 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "rbloom"
+name = "rbloom-gcs"
 description = "Highly optimized Bloom filter that mimics the Python set API, written in Rust"
 requires-python = ">=3.7"
 classifiers = [
@@ -14,7 +14,7 @@ classifiers = [
 
 
 [project.urls]
-"Source Code" = "https://github.com/KenanHanke/rbloom"
+"Source Code" = "https://github.com/nelson-liu/rbloom-gcs"
 
 [tool.maturin]
 sdist-include = ["LICENSE", "README.md"]
