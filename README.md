@@ -1,3 +1,12 @@
+# rbloom-gcs
+
+This is a fork of the excellent [rBloom](https://github.com/KenanHanke/rbloom) package. The main changes are:
+
+- `Bloom` no longer accepts a hash function---the inputs are expected to be
+  pre-hashed (i.e., an integer between -2^127 and 2^127 - 1).
+- Added a new function `Bloom.load_from_gcs(bucket: str, object_path: str)`,
+  which loads the Bloom filter from the provided GCS bucket and object path. 
+
 # rBloom
 
 [![PyPI](https://img.shields.io/pypi/v/rbloom)](https://pypi.org/project/rbloom/)
