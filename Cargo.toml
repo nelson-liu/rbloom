@@ -1,6 +1,6 @@
 [package]
 name = "rbloom-gcs"
-version = "1.5.3"
+version = "1.5.4"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -15,3 +15,5 @@ pyo3 = { version = "0.23", features = [
 ] } # stable ABI with minimum Python version 3.7
 sha2 = "0.10"
 cloud-storage = { version = "0.11", features = ["sync", "global-client"] }
+tokio = { version = "1.43", features = [ "rt-multi-thread" ]}
+futures-util = "0.3"

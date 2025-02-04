@@ -1,5 +1,6 @@
 use bitline::BitLine;
 use cloud_storage::Object;
+use futures_util::stream::{StreamExt, TryStreamExt};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyType;
@@ -8,6 +9,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::mem;
 use std::path::PathBuf;
+use tokio::runtime::Runtime;
 
 #[pyclass(module = "rbloom")]
 #[derive(Clone)]
@@ -293,6 +295,65 @@ impl Bloom {
         let filter = BitLine::from_boxed_slice(data.into_boxed_slice());
 
         Ok(Bloom { filter, k })
+    }
+
+    /// Load a Bloom filter from Google Cloud Storage by streaming in chunks
+    #[classmethod]
+    pub fn load_from_gcs_streamed(
+        _cls: &Bound<'_, PyType>,
+        bucket: String,
+        object_path: String,
+    ) -> PyResult<Bloom> {
+        // Create a local Tokio runtime
+        let rt = Runtime::new()
+            .map_err(|e| PyValueError::new_err(format!("Failed to create Tokio runtime: {e}")))?;
+
+        rt.block_on(async move {
+            // 1) Start the streaming download. This yields a Stream<Item = Result<u8>>.
+            let mut stream = Object::download_streamed(&bucket, &object_path)
+                .await
+                .map_err(|e| PyValueError::new_err(format!("GCS download failed: {e}")))?;
+
+            // 2) Read the first 8 bytes from the stream to parse `k`.
+            let mut k_bytes = [0u8; 8];
+            for i in 0..8 {
+                match stream.next().await {
+                    Some(Ok(byte)) => k_bytes[i] = byte,
+                    Some(Err(e)) => {
+                        return Err(PyValueError::new_err(format!(
+                            "Stream read error while reading k: {e}"
+                        )))
+                    }
+                    None => {
+                        return Err(PyValueError::new_err(
+                            "Object is too small to contain a valid Bloom filter",
+                        ))
+                    }
+                }
+            }
+            let k = u64::from_le_bytes(k_bytes);
+
+            // 3) Convert the single-byte stream into a chunked stream to reduce overhead.
+            //    Each yielded chunk is a Vec<u8> up to CHUNK_SIZE in length.
+            const CHUNK_SIZE: usize = 16 * 1024 * 1024; // e.g. 16 MB
+            let mut chunked_stream = stream.try_chunks(CHUNK_SIZE);
+
+            // 4) Collect chunks into a single buffer
+            let mut bit_buffer = Vec::new();
+            while let Some(chunk_result) = chunked_stream.next().await {
+                let chunk = chunk_result.map_err(|e| {
+                    PyValueError::new_err(format!("Stream read error in chunk: {e}"))
+                })?;
+                // Each `chunk` is a Vec<u8> of up to CHUNK_SIZE bytes
+                bit_buffer.extend_from_slice(&chunk);
+            }
+
+            // 5) Convert that Vec into a Box<[u8]> (no copy).
+            let filter = BitLine::from_boxed_slice(bit_buffer.into_boxed_slice());
+
+            // 6) Return the final Bloom filter object
+            Ok(Bloom { filter, k })
+        })
     }
 
     /// Save to a file, see "Persistence" section in the README

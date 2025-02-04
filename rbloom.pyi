@@ -25,6 +25,10 @@ class Bloom:
     @classmethod
     def load_from_gcs(cls, bucket: str, object_path: str) -> Bloom: ...
 
+    # load from GCS, but with a streamed download
+    @classmethod
+    def load_from_gcs_streamed(cls, bucket: str, object_path: str) -> Bloom: ...
+
     # load from bytes(), see section "Persistence"
     @classmethod
     def load_bytes(cls, data: bytes) -> Bloom: ...

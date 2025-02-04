@@ -1011,11 +1011,13 @@ dependencies = [
 
 [[package]]
 name = "rbloom-gcs"
-version = "1.5.3"
+version = "1.5.4"
 dependencies = [
  "cloud-storage",
+ "futures-util",
  "pyo3",
  "sha2",
+ "tokio",
 ]
 
 [[package]]
