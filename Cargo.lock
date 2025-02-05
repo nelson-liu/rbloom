@@ -157,8 +157,7 @@ dependencies = [
 [[package]]
 name = "cloud-storage"
 version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7602ac4363f68ac757d6b87dd5d850549a14d37489902ae639c06ecec06ad275"
+source = "git+https://github.com/nelson-liu/cloud-storage-rs.git?branch=streaming-bytes#1ddbd07308f97b97bf24a5f3ea6b0a23c9e4a9af"
 dependencies = [
  "async-trait",
  "base64 0.13.1",
@@ -1011,8 +1010,9 @@ dependencies = [
 
 [[package]]
 name = "rbloom-gcs"
-version = "1.5.4"
+version = "1.5.6"
 dependencies = [
+ "bytes",
  "cloud-storage",
  "futures-util",
  "pyo3",
