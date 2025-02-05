@@ -298,11 +298,14 @@ impl Bloom {
     }
 
     /// Load a Bloom filter from Google Cloud Storage by streaming in chunks
+    /// `chunk_size` controls how large each chunk is (in bytes).
     #[classmethod]
+    #[pyo3(signature = (bucket, object_path, chunk_size = 1024 * 1024 * 1024))]
     pub fn load_from_gcs_streamed(
         _cls: &Bound<'_, PyType>,
         bucket: String,
         object_path: String,
+        chunk_size: usize,
     ) -> PyResult<Bloom> {
         // Create a local Tokio runtime
         let rt = Runtime::new()
@@ -334,9 +337,8 @@ impl Bloom {
             let k = u64::from_le_bytes(k_bytes);
 
             // 3) Convert the single-byte stream into a chunked stream to reduce overhead.
-            //    Each yielded chunk is a Vec<u8> up to CHUNK_SIZE in length.
-            const CHUNK_SIZE: usize = 16 * 1024 * 1024; // e.g. 16 MB
-            let mut chunked_stream = stream.try_chunks(CHUNK_SIZE);
+            //    Each yielded chunk is a Vec<u8> up to chunk_size in length.
+            let mut chunked_stream = stream.try_chunks(chunk_size);
 
             // 4) Collect chunks into a single buffer
             let mut bit_buffer = Vec::new();

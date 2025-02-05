@@ -5,9 +5,10 @@ This is a fork of the excellent [rBloom](https://github.com/KenanHanke/rbloom) p
 - `Bloom` no longer accepts a hash function---the inputs are expected to be
   pre-hashed (i.e., an integer between -2^127 and 2^127 - 1).
 - Added two new functions `Bloom.load_from_gcs(bucket: str, object_path: str)`
-  and `Bloom.load_from_gcs_streamed(bucket: str, object_path: str)`, which loads
-  the Bloom filter from the provided GCS bucket and object path. The latter
-  streams the download from GCS, while the former uses a non-streamed download.
+  and `Bloom.load_from_gcs_streamed(bucket: str, object_path: str, chunk_size:
+  int = 1024 * 1024 * 1024)`, which loads the Bloom filter from the provided GCS
+  bucket and object path. The latter streams the download from GCS, while the
+  former uses a non-streamed download.
 
 # rBloom
 
